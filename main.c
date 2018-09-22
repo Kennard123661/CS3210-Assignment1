@@ -18,8 +18,8 @@ int main() {
     const unsigned int TRAIN_SPEED = 1;
     const unsigned int NUM_LINES = 3;
     const char LINE_PREFIXES[] = {'g','y','b'};
-    const char* STATION_PRINT_TEMPLATE = "%s%u-s%u";
-    const char* LINK_PRINT_TEMPLATE = "%s%u-s%u->s%u";
+    const char* STATION_PRINT_TEMPLATE = "%c%u-s%u";
+    const char* LINK_PRINT_TEMPLATE = "%c%u-s%u->s%u";
     const char* TIME_UPDATE_PREFIX = "%u: ";
 
     unsigned int num_stations;
@@ -89,7 +89,6 @@ int main() {
         printf("\n");
     }
 
-
     Train** trains = malloc(sizeof(Train*) * NUM_LINES);
     for (unsigned int i = 0; i < NUM_LINES; i++) {
         trains[i] = malloc(sizeof(Train) * num_trains_per_line[i]);
@@ -97,7 +96,7 @@ int main() {
             trains[i][j] = (Train){i, j, 0, STATION};
         }
     }
-/*
+    
     for (unsigned int t = 0; t < num_ticks; t++) {
         for (unsigned int i = 0; i < NUM_LINES; i++) {
             for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
@@ -143,7 +142,8 @@ int main() {
                 }
             }
         }
-    }*/
+        printf("\n");
+    }
 
     // Final Update here.
 

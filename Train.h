@@ -13,6 +13,6 @@ typedef struct {
     unsigned int train_idx;
     unsigned int line_type;
     unsigned int line_idx;
-    unsigned int time_left;
+    int time_left;
     enum train_loc loc;
 } Train;
