@@ -72,7 +72,7 @@ int main() {
     unsigned int count = 0;
     for (unsigned int i = 0; i < NUM_LINES; i++) {
         for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-            trains[count++] = (Train){i, j, 0, 1, STATION, 0};
+            trains[count++] = (Train){i, j, (j % 2 == 0) ? 0 : (num_stations_per_line[i] - 1), 1, STATION, 0};
         }
     }
 
@@ -165,7 +165,8 @@ int main() {
         #pragma omp parallel for num_threads(total_num_trains)
         for (unsigned int i = 0; i < total_num_trains; i++) {
             // Step 3: Other trains acquire lock if possible and make move.
-            if (!trains[i].hasActed) {
+
+            if (!trains[i].hasActed && (trains[i].train_idx < ((t+1) * 2))) {
                 if (trains[i].loc == STATION) {
                     // Try to occupy the station's lock
                     unsigned int station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
@@ -202,6 +203,10 @@ int main() {
         // Further multithreading might cause more overhead and printing to console is not very fast.
         printf(TIME_UPDATE_PREFIX, t);
         for (unsigned int i = 0; i < total_num_trains; i++) {
+            if (trains[i].train_idx >= (t+1) * 2) {
+                continue;
+            }
+
             unsigned int current_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
             if ((trains[i].loc == STATION) || (trains[i].loc == OPENING) || (trains[i].loc == OPENED)) {
                 printf(STATION_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].network_idx], trains[i].train_idx, current_station_idx);
