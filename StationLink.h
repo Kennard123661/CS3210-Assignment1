@@ -8,5 +8,6 @@
 #endif //CS3210_ASSIGNMENT1_STATIONLINK_H
 
 typedef struct {
-
+    unsigned int start;
+    unsigned int end;
 } StationLink;

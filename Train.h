@@ -7,12 +7,11 @@
 
 #endif //CS3210_ASSIGNMENT1_TRAIN_H
 
-enum train_loc {STATION, LINK};
+enum train_loc {STATION, LINK, LOAD_STATION};
 
 typedef struct {
-    unsigned int train_idx;
-    unsigned int line_type;
     unsigned int line_idx;
     unsigned int time_left;
     enum train_loc loc;
+    unsigned char hasActed;
 } Train;
