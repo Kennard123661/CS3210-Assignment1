@@ -106,11 +106,21 @@ int main() {
         }
     }
 
-    printf("total trains %u",total_num_trains);
+    omp_set_num_threads(total_num_trains);
+    omp_set_dynamic(0);
+    int nthreads, tid;
+    #pragma omp parallel private(nthreads, tid) num_threads(total_num_trains)
+    {
+        printf("%d", omp_get_thread_num());
+        printf("hello world\n");
+    }
+
+
+    // printf("total trains %u",total_num_trains);
     for (unsigned int t = 0; t < num_ticks; t++) {
-        #pragma openmp omp parallel for collapse(2) num_threads(total_num_trains) shared(trains, train_lock_ptrs, networks, station_popularity, link_costs, station_loading_lock, link_mutexes);
+
+        #pragma omp parallel for num_threads(NUM_LINES)
         for (unsigned int i = 0; i < NUM_LINES; i++) {
-            printf("Openmp outer threads %d\n", omp_get_thread_num());
             for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
                 printf("Openmp inner threads %d\n", omp_get_thread_num());
 
@@ -119,7 +129,7 @@ int main() {
                     // Release lock and transition
                     if (trains[i][j].time_left <= 0) {
                         // printf("thread %u has released a lock\n", i * 10 + j);
-                        omp_lock_t* lock_ptr = train_lock_ptrs[i][j];
+                        omp_lock_t *lock_ptr = train_lock_ptrs[i][j];
                         train_lock_ptrs[i][j] = NULL;
                         omp_unset_lock(lock_ptr);
 
@@ -135,8 +145,10 @@ int main() {
                         }
                     }
                 }
-                #pragma omp barrier
+            }
 
+            #pragma omp parallel for num_threads(num_trains_per_line[i]) shared(trains, train_lock_ptrs, networks, station_popularity, link_costs, station_loading_lock, link_mutexes)
+            for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
                 // Step 2: Trains holding lock release first if possible.
                 if ((trains[i][j].loc == OPENING) || (trains[i][j].loc == LINK)) {
                     trains[i][j].time_left -= 1;
@@ -144,7 +156,7 @@ int main() {
                     // Release lock and transition
                     if (trains[i][j].time_left <= 0) {
                         // printf("thread %u has released a lock\n", i * 10 + j);
-                        omp_lock_t* lock_ptr = train_lock_ptrs[i][j];
+                        omp_lock_t *lock_ptr = train_lock_ptrs[i][j];
                         train_lock_ptrs[i][j] = NULL;
                         omp_unset_lock(lock_ptr);
 
@@ -160,8 +172,10 @@ int main() {
 
                     trains[i][j].hasActed = 1;
                 }
-                #pragma omp barrier
+            }
 
+            #pragma omp parallel for num_threads(num_trains_per_line[i]) shared(trains, train_lock_ptrs, networks, station_popularity, link_costs, station_loading_lock, link_mutexes)
+            for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
                 // Step 3: Other trains acquire lock if possible and make move.
                 if (!trains[i][j].hasActed) {
                     if (trains[i][j].loc == STATION) {
@@ -198,7 +212,6 @@ int main() {
 
                     trains[i][j].hasActed = 1;
                 }
-                #pragma omp barrier
 
                 trains[i][j].hasActed = 0; // Reset hasActed for the next iteration
             }
