@@ -10,6 +10,8 @@
 enum train_loc {STATION, LINK, OPENING, OPENED};
 
 typedef struct {
+    unsigned int network_idx;
+    unsigned int train_idx;
     unsigned int line_idx;
     float time_left;
     enum train_loc loc;

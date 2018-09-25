@@ -62,19 +62,20 @@ int main() {
         printf("\n");
     }
 
-    Train** trains = malloc(sizeof(Train*) * NUM_LINES);
-    for (unsigned int i = 0; i < NUM_LINES; i++) {
-        trains[i] = malloc(sizeof(Train) * num_trains_per_line[i]);
-        for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-            trains[i][j] = (Train){0, 1, STATION, 0};
-        }
-    }
-
     // Each thread represents a train.
     unsigned int total_num_trains = 0;
     for (unsigned int i = 0; i < NUM_LINES; i++) {
         total_num_trains += num_trains_per_line[i];
     }
+
+    Train* trains = malloc(sizeof(Train) * total_num_trains);
+    unsigned int count = 0;
+    for (unsigned int i = 0; i < NUM_LINES; i++) {
+        for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
+            trains[count++] = (Train){i, j, 0, 1, STATION, 0};
+        }
+    }
+
 
     char** have_trains_acted;
     have_trains_acted = malloc(sizeof(char*) * NUM_LINES);
@@ -98,146 +99,124 @@ int main() {
     }
 
     // Denotes pointers owned by trains.
-    omp_lock_t*** train_lock_ptrs = malloc(sizeof(omp_lock_t**) * NUM_LINES);
-    for (unsigned int i = 0; i < NUM_LINES; i++) {
-        train_lock_ptrs[i] = malloc(sizeof(omp_lock_t*) * num_trains_per_line[i]);
-        for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-            train_lock_ptrs[i][j] = NULL;
-        }
+    omp_lock_t** train_lock_ptrs = malloc(sizeof(omp_lock_t*) * total_num_trains);
+    for (unsigned int i = 0; i < total_num_trains; i++) {
+        train_lock_ptrs[i] = NULL;
     }
 
     omp_set_num_threads(total_num_trains);
-    omp_set_dynamic(0);
-    int nthreads, tid;
-    #pragma omp parallel private(nthreads, tid) num_threads(total_num_trains)
-    {
-        printf("%d", omp_get_thread_num());
-        printf("hello world\n");
-    }
+    // omp_set_dynamic(0);
 
 
     // printf("total trains %u",total_num_trains);
     for (unsigned int t = 0; t < num_ticks; t++) {
 
-        #pragma omp parallel for num_threads(NUM_LINES)
-        for (unsigned int i = 0; i < NUM_LINES; i++) {
-            for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-                printf("Openmp inner threads %d\n", omp_get_thread_num());
+        #pragma omp parallel for num_threads(total_num_trains)
+        for (unsigned int i = 0; i < total_num_trains; i++) {
+            // printf("Openmp inner threads %d\n", omp_get_thread_num());
 
-                // Step 1: Update trains that previously acquired locks but are have their time limit exceeded
-                if ((trains[i][j].loc == OPENING) || (trains[i][j].loc == LINK)) {
-                    // Release lock and transition
-                    if (trains[i][j].time_left <= 0) {
-                        // printf("thread %u has released a lock\n", i * 10 + j);
-                        omp_lock_t *lock_ptr = train_lock_ptrs[i][j];
-                        train_lock_ptrs[i][j] = NULL;
-                        omp_unset_lock(lock_ptr);
+            // Step 1: Update trains that previously acquired locks but are have their time limit exceeded
+            if ((trains[i].loc == OPENING) || (trains[i].loc == LINK)) {
+                // Release lock and transition
+                if (trains[i].time_left <= 0) {
+                    omp_lock_t *lock_ptr = train_lock_ptrs[i];
+                    train_lock_ptrs[i] = NULL;
+                    omp_unset_lock(lock_ptr);
 
 
-                        if (trains[i][j].loc == OPENING) {
-                            // Finish serving commuters at the station.
-                            //printf("Train %u has finished serving station idx %u lul\n", i * 10 + j, trains[i][j].line_idx);
-                            trains[i][j].loc = OPENED;
-                        } else {
-                            // Finish the line so proceed to the next link in the network.
-                            trains[i][j].loc = STATION;
-                            trains[i][j].line_idx = get_next_node_index(networks[i], trains[i][j].line_idx);
-                        }
+                    if (trains[i].loc == OPENING) {
+                        // Finish serving commuters at the station.
+                        trains[i].loc = OPENED;
+                    } else {
+                        // Finish the line so proceed to the next link in the network.
+                        trains[i].loc = STATION;
+                        trains[i].line_idx = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
                     }
                 }
-            }
-
-            #pragma omp parallel for num_threads(num_trains_per_line[i]) shared(trains, train_lock_ptrs, networks, station_popularity, link_costs, station_loading_lock, link_mutexes)
-            for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-                // Step 2: Trains holding lock release first if possible.
-                if ((trains[i][j].loc == OPENING) || (trains[i][j].loc == LINK)) {
-                    trains[i][j].time_left -= 1;
-
-                    // Release lock and transition
-                    if (trains[i][j].time_left <= 0) {
-                        // printf("thread %u has released a lock\n", i * 10 + j);
-                        omp_lock_t *lock_ptr = train_lock_ptrs[i][j];
-                        train_lock_ptrs[i][j] = NULL;
-                        omp_unset_lock(lock_ptr);
-
-                        if (trains[i][j].loc == OPENING) {
-                            // Finish serving commuters at the station.
-                            trains[i][j].loc = OPENED;
-                        } else {
-                            // Finish the line so proceed to the next link in the network.
-                            trains[i][j].loc = STATION;
-                            trains[i][j].line_idx = get_next_node_index(networks[i], trains[i][j].line_idx);
-                        }
-                    }
-
-                    trains[i][j].hasActed = 1;
-                }
-            }
-
-            #pragma omp parallel for num_threads(num_trains_per_line[i]) shared(trains, train_lock_ptrs, networks, station_popularity, link_costs, station_loading_lock, link_mutexes)
-            for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-                // Step 3: Other trains acquire lock if possible and make move.
-                if (!trains[i][j].hasActed) {
-                    if (trains[i][j].loc == STATION) {
-                        // Try to occupy the station's lock
-                        unsigned int station_idx = get_station_idx(networks[i], trains[i][j].line_idx);
-                        omp_lock_t* lock_ptr = &station_loading_lock[station_idx];
-                        if (omp_test_lock(lock_ptr)) {
-                            // Successfully acquired lock, begin loading
-                            // printf("thread %u has acquired a lock of station link idx %u\n", i * 10 + j, trains[i][j].line_idx);
-                            trains[i][j].loc = OPENING;
-                            trains[i][j].time_left = station_popularity[station_idx] *
-                                    ((float) ((rand() % STATION_WAITING_RANGE) + STATION_WAITING_MIN)) - 1;
-                            train_lock_ptrs[i][j] = lock_ptr;
-                        }
-
-                    } else if (trains[i][j].loc == OPENED) {
-                        unsigned int curr_station_idx = get_station_idx(networks[i], trains[i][j].line_idx);
-                        unsigned int next_loc = get_next_node_index(networks[i], trains[i][j].line_idx);
-                        unsigned int next_station_idx = get_station_idx(networks[i], next_loc);
-
-                        omp_lock_t* link_loc_ptr = &link_mutexes[curr_station_idx][next_station_idx];
-                        if (omp_test_lock(link_loc_ptr)) {
-                            //printf("thread %u has acquired a lock for link %u to %u\n", i * 10 + j, trains[i][j].line_idx, next_loc);
-                            // Suceessfully acquired lock.
-                            trains[i][j].loc = LINK;
-                            train_lock_ptrs[i][j] = link_loc_ptr;
-                            trains[i][j].time_left = link_costs[curr_station_idx][next_station_idx] - 1;
-                        }
-                    }
-
-                    if ((train_lock_ptrs[i][j] != NULL) && (trains[i][j].loc != LINK)) {
-                        //printf("thread %u is currently at station %u\n", i * 10 + j, trains[i][j].line_idx);
-                    }
-
-                    trains[i][j].hasActed = 1;
-                }
-
-                trains[i][j].hasActed = 0; // Reset hasActed for the next iteration
             }
         }
 
+        #pragma omp parallel for num_threads(total_num_trains)
+        for (unsigned int i = 0; i < total_num_trains; i++) {
+            // Step 2: Trains holding lock release first if possible.
+            if ((trains[i].loc == OPENING) || (trains[i].loc == LINK)) {
+                trains[i].time_left -= 1;
+
+                // Release lock and transition
+                if (trains[i].time_left <= 0) {
+                    omp_lock_t *lock_ptr = train_lock_ptrs[i];
+                    train_lock_ptrs[i] = NULL;
+                    omp_unset_lock(lock_ptr);
+
+                    if (trains[i].loc == OPENING) {
+                        // Finish serving commuters at the station.
+                        trains[i].loc = OPENED;
+                    } else {
+                        // Finish the line so proceed to the next link in the network.
+                        trains[i].loc = STATION;
+                        trains[i].line_idx = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                    }
+                }
+
+                trains[i].hasActed = 1;
+            }
+        }
+
+        #pragma omp parallel for num_threads(total_num_trains)
+        for (unsigned int i = 0; i < total_num_trains; i++) {
+            // Step 3: Other trains acquire lock if possible and make move.
+            if (!trains[i].hasActed) {
+                if (trains[i].loc == STATION) {
+                    // Try to occupy the station's lock
+                    unsigned int station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    omp_lock_t* lock_ptr = &station_loading_lock[station_idx];
+                    if (omp_test_lock(lock_ptr)) {
+                        // Successfully acquired lock, begin loading
+                        trains[i].loc = OPENING;
+                        trains[i].time_left = station_popularity[station_idx] *
+                                ((float) ((rand() % STATION_WAITING_RANGE) + STATION_WAITING_MIN)) - 1;
+                        train_lock_ptrs[i] = lock_ptr;
+                    }
+
+                } else if (trains[i].loc == OPENED) {
+                    unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int next_loc = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_loc);
+
+                    omp_lock_t* link_loc_ptr = &link_mutexes[curr_station_idx][next_station_idx];
+                    if (omp_test_lock(link_loc_ptr)) {
+                        // Suceessfully acquired lock.
+                        trains[i].loc = LINK;
+                        train_lock_ptrs[i] = link_loc_ptr;
+                        trains[i].time_left = link_costs[curr_station_idx][next_station_idx] - 1;
+                    }
+                }
+
+                trains[i].hasActed = 1;
+            }
+
+            trains[i].hasActed = 0; // Reset hasActed for the next iteration
+        }
 
         // I decide not to use multithreading for printing to console since it is a simple operation
         // Further multithreading might cause more overhead and printing to console is not very fast.
         printf(TIME_UPDATE_PREFIX, t);
-        for (unsigned int i = 0; i < NUM_LINES; i++) {
-            for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-                unsigned int current_station_idx = get_station_idx(networks[i], trains[i][j].line_idx);
-                if ((trains[i][j].loc == STATION) || (trains[i][j].loc == OPENING) || (trains[i][j].loc == OPENED)) {
-                    printf(STATION_PRINT_TEMPLATE, LINE_PREFIXES[i], j, current_station_idx);
-                } else {
-                    unsigned int next_loc = get_next_node_index(networks[i], trains[i][j].line_idx);
-                    unsigned int next_station_idx = get_station_idx(networks[i], next_loc);
-                    printf(LINK_PRINT_TEMPLATE, LINE_PREFIXES[i], j, current_station_idx, next_station_idx);
-                }
-                if (i != (NUM_LINES - 1) || j != (num_trains_per_line[i] - 1)) {
-                    printf(", ");
-                }
+        for (unsigned int i = 0; i < total_num_trains; i++) {
+            unsigned int current_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+            if ((trains[i].loc == STATION) || (trains[i].loc == OPENING) || (trains[i].loc == OPENED)) {
+                printf(STATION_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].network_idx], trains[i].train_idx, current_station_idx);
+            } else {
+                unsigned int next_loc = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_loc);
+                printf(LINK_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].network_idx], trains[i].train_idx, current_station_idx, next_station_idx);
+            }
+            if (i != (total_num_trains - 1)) {
+                printf(", ");
             }
         }
         printf("\n");
     }
+
 
     // Final Update here.
 
@@ -246,9 +225,6 @@ int main() {
     ////////////////////////////////////
     // Clean up memory on termination //
     ////////////////////////////////////
-    for (unsigned int i = 0; i < NUM_LINES; i++) {
-        free(train_lock_ptrs[i]);
-    }
     free(train_lock_ptrs);
     train_lock_ptrs = NULL;
 
@@ -261,9 +237,6 @@ int main() {
     free(link_mutexes);
     link_mutexes = NULL;
 
-    for (int i = 0; i < NUM_LINES; i++) {
-        free(trains[i]);
-    }
     free(trains);
     trains = NULL;
 
