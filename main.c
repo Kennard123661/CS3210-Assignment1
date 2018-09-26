@@ -104,7 +104,7 @@ int main() {
     }
 
     // Model Problem for Part 2
-    StationWait* station_waits = malloc(sizeof(StationWait) * (num_stations * 2));
+    StationWait* station_waits = malloc(sizeof(StationWait) * num_stations * 2);
     for (unsigned int i = 0; i < num_stations; i++) {
         station_waits[i] = (StationWait){0.0, (unsigned int) 0xFFFFFFFF, 0, 0, 0};
     }
@@ -181,11 +181,14 @@ int main() {
                 if (trains[i].loc == STATION) {
                     // Try to occupy the station's lock
                     unsigned int station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int station_num = station_idx;
+                    station_idx += is_reverse_direction(&networks[trains[i].network_idx], station_idx) ? num_stations : 0;
+
                     omp_lock_t* lock_ptr = &station_loading_lock[station_idx];
                     if (omp_test_lock(lock_ptr)) {
                         // Successfully acquired lock, begin loading
                         trains[i].loc = OPENING;
-                        trains[i].time_left = station_popularity[station_idx] *
+                        trains[i].time_left = station_popularity[station_num] *
                                 ((float) ((rand() % STATION_WAITING_RANGE) + STATION_WAITING_MIN)) - 1;
                         train_lock_ptrs[i] = lock_ptr;
                     }

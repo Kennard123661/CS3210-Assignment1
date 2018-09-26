@@ -21,4 +21,5 @@ LineNetwork* get_line_network(
         unsigned int num_stations,
         unsigned int num_stations_in_line
 );
+unsigned char is_reverse_direction(LineNetwork* network, unsigned int index);
 void delete_line_network(LineNetwork* network);

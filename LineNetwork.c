@@ -14,6 +14,10 @@ unsigned int get_next_node_index(LineNetwork* network, unsigned int index)
     return (index + 1) % network->num_nodes;
 }
 
+unsigned char is_reverse_direction(LineNetwork* network, unsigned int index) {
+    return index >= ((network->num_nodes) / 2);
+}
+
 /**
  * Gets the station number of a train at the current index in the train network.
  * */
