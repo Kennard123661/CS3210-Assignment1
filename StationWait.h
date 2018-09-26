@@ -16,4 +16,5 @@ typedef struct {
 } StationWait;
 
 void train_arrive(unsigned int time, StationWait* station_wait);
+void train_leave(unsigned int time, StationWait* stationWait);
 StationWait* get_station_wait();

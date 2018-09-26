@@ -71,7 +71,7 @@ int main() {
     unsigned int count = 0;
     for (unsigned int i = 0; i < NUM_LINES; i++) {
         for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-            trains[count++] = (Train){i, j, (j % 2 == 0) ? 0 : (num_stations_per_line[i] - 1), 1, STATION, 0};
+            trains[count++] = (Train){i, j, (j % 2 == 0) ? 0 : (num_stations_per_line[i]), 1, STATION, 0};
         }
     }
 
@@ -121,16 +121,16 @@ int main() {
 
             // Step 1: Update trains that previously acquired locks but are have their time limit exceeded
             if ((trains[i].loc == OPENING) || (trains[i].loc == LINK)) {
+
                 // Release lock and transition
                 if (trains[i].time_left <= 0) {
-                    omp_lock_t *lock_ptr = train_lock_ptrs[i];
-                    train_lock_ptrs[i] = NULL;
-                    omp_unset_lock(lock_ptr);
                     unsigned int next_node = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
                     unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
                     unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_node);
 
-
+                    unsigned int station_wait_idx = curr_station_idx +
+                            (is_reverse_direction(networks[trains[i].network_idx], trains[i].line_idx) ? num_stations : 0);
+                    train_leave(t, &station_waits[station_wait_idx]);
                     if ((trains[i].loc == OPENING) && (curr_station_idx != next_station_idx)) {
                         // Finish serving commuters at the station.
                         trains[i].loc = OPENED;
@@ -139,6 +139,10 @@ int main() {
                         trains[i].loc = STATION;
                         trains[i].line_idx = next_node;
                     }
+
+                    omp_lock_t *lock_ptr = train_lock_ptrs[i];
+                    train_lock_ptrs[i] = NULL;
+                    omp_unset_lock(lock_ptr);
                 }
             }
         }
@@ -158,6 +162,10 @@ int main() {
                     unsigned int next_node = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
                     unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
                     unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_node);
+
+                    unsigned int station_wait_idx = curr_station_idx +
+                            (is_reverse_direction(networks[trains[i].network_idx], trains[i].line_idx) ? num_stations : 0);
+                    train_leave(t, &station_waits[station_wait_idx]);
 
                     if ((trains[i].loc == OPENING) && (curr_station_idx != next_station_idx)) {
                         // Finish serving commuters at the station.
@@ -184,9 +192,13 @@ int main() {
                     unsigned int station_num = station_idx;
                     station_idx += is_reverse_direction(&networks[trains[i].network_idx], station_idx) ? num_stations : 0;
 
+                    unsigned int station_wait_idx = station_idx;
+                    train_arrive(t, &station_waits[station_wait_idx]);
+
                     omp_lock_t* lock_ptr = &station_loading_lock[station_idx];
                     if (omp_test_lock(lock_ptr)) {
                         // Successfully acquired lock, begin loading
+                        // printf("%u acquired semaphore\n", i);
                         trains[i].loc = OPENING;
                         trains[i].time_left = station_popularity[station_num] *
                                 ((float) ((rand() % STATION_WAITING_RANGE) + STATION_WAITING_MIN)) - 1;
@@ -197,7 +209,7 @@ int main() {
                     unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
                     unsigned int next_loc = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
                     unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_loc);
-
+                    // printf("%u acquired LINK semaphore\n", i);
                     omp_lock_t* link_loc_ptr = &link_mutexes[curr_station_idx][next_station_idx];
                     if (omp_test_lock(link_loc_ptr)) {
                         // Suceessfully acquired lock.
