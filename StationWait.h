@@ -8,7 +8,7 @@
 #endif //CS3210_ASSIGNMENT1_STATIONWAIT_H
 
 typedef struct {
-    float average_wait_time;// = 0;
+    float total_wait_time;// = 0;
     unsigned int min_wait_time;// = 0xFFFFFFFF; // hex code for maximum value that can be represented by 32 bits.
     unsigned int max_wait_time;// = 0;
     unsigned int num_trains_arrive;// = 0;

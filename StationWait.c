@@ -9,12 +9,11 @@ void train_arrive(unsigned int time, StationWait* station_wait)
     station_wait->num_trains_arrive++;
 
     // incremental average
-    station_wait->average_wait_time = station_wait->average_wait_time * ((float) station_wait->num_trains_arrive - 1) /
-                                      (station_wait->num_trains_arrive) + ((float) time) / station_wait->num_trains_arrive;
+    station_wait->total_wait_time += time_diff;
     station_wait->max_wait_time = (time > station_wait->max_wait_time) ? time : station_wait->max_wait_time;
     station_wait->min_wait_time = (time < station_wait->min_wait_time) ? time : station_wait->min_wait_time;
 }
 
 void train_leave(unsigned int time, StationWait* station_wait) {
-    station_wait->prev_time_stamp = station_wait;
+    station_wait->prev_time_stamp = time;
 }

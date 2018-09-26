@@ -155,9 +155,6 @@ int main() {
 
                 // Release lock and transition
                 if (trains[i].time_left <= 0) {
-                    omp_lock_t *lock_ptr = train_lock_ptrs[i];
-                    train_lock_ptrs[i] = NULL;
-                    omp_unset_lock(lock_ptr);
 
                     unsigned int next_node = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
                     unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
@@ -175,6 +172,9 @@ int main() {
                         trains[i].loc = STATION;
                         trains[i].line_idx = next_node;
                     }
+                    omp_lock_t *lock_ptr = train_lock_ptrs[i];
+                    train_lock_ptrs[i] = NULL;
+                    omp_unset_lock(lock_ptr);
                 }
 
                 trains[i].hasActed = 1;
@@ -250,6 +250,25 @@ int main() {
 
 
     // Final Update here.
+    for (unsigned int i = 0; i < NUM_LINES; i++) {
+        unsigned int average_waiting_time = 0;
+        unsigned int num_waiting_count = 0;
+        unsigned int total_min = 0;
+        unsigned int total_max = 0;
+        unsigned int total_valid_minmax = 0;
+        for (unsigned int j = 0; j < ((*networks[i]).num_nodes / 2); j++) {
+            unsigned int station_num = get_station_idx(networks[i], j);
+            StationWait station_wait = station_waits[station_num];
+            if (station_wait.num_trains_arrive > 0) {
+                average_waiting_time += station_wait.total_wait_time;
+                num_waiting_count += station_wait.num_trains_arrive;
+                total_min += station_wait.min_wait_time;
+                total_max += station_wait.max_wait_time;
+                total_valid_minmax++;
+            }
+        }
+        printf("%.2f %.2f %.2f\n", average_waiting_time / ((float) num_waiting_count), total_min / ((float) total_valid_minmax), total_max / ((float) total_valid_minmax));
+    }
 
 
 
