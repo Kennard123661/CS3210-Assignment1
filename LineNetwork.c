@@ -47,8 +47,8 @@ LineNetwork* get_line_network(
         }
     }
 
-    for (unsigned int i =  0; i < num_stations_in_line; i++) {
-        station_nums[num_stations_in_line + i] = station_nums[num_stations_in_line - 1 - i];
+    for (unsigned int i = 0; i < num_stations_in_line; i++) {
+        station_nums[i + num_stations_in_line] = station_nums[num_stations_in_line - 1 - i];
     }
 
     LineNetwork* network = malloc(sizeof(LineNetwork));
