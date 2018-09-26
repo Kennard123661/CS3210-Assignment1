@@ -106,7 +106,7 @@ int main() {
     // Model Problem for Part 2
     StationWait* station_waits = malloc(sizeof(StationWait) * (num_stations * 2));
     for (unsigned int i = 0; i < num_stations; i++) {
-        station_waits[i] = (StationWait){0, 0xFFFFFFFF, 0, 0, 0};
+        station_waits[i] = (StationWait){0.0, (unsigned int) 0xFFFFFFFF, 0, 0, 0};
     }
 
     omp_set_num_threads(total_num_trains);
