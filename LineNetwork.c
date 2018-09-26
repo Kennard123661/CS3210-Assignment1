@@ -17,10 +17,10 @@ unsigned int get_next_node_index(LineNetwork* network, unsigned int index)
 /**
  * Gets the station number of a train at the current index in the train network.
  * */
-unsigned int get_station_idx(LineNetwork *network, unsigned int index)
-{
+unsigned int get_station_idx(LineNetwork *network, unsigned int index) {
     return network->station_numbers[index];
 }
+
 
 /**
  *  This builds  a network of train stations for a single line.

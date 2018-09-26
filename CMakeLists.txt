@@ -3,7 +3,7 @@ project(cs3210_assignment1 C)
 
 set(CMAKE_C_STANDARD 11)
 
-add_executable(cs3210_assignment1 main.c LineNetwork.c LineNetwork.h StationLink.c StationLink.h Train.c Train.h)
+add_executable(cs3210_assignment1 main.c LineNetwork.c LineNetwork.h Train.c Train.h StationWait.h StationWait.c)
 
 find_package(OpenMP)
 if (OPENMP_FOUND)

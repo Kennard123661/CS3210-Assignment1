@@ -5,7 +5,7 @@
 #include <time.h>
 #include "LineNetwork.h"
 #include "Train.h"
-#include "StationLink.h"
+#include "StationWait.h"
 
 #define STATION_NAMES_BUFFER_SIZE 8196
 #define STATION_NAME_BUFFER_SIZE 256
@@ -15,7 +15,6 @@ unsigned int** get_station_link_costs(unsigned int num_stations);
 float* get_station_popularity(unsigned int num_stations);
 char*** get_stations_in_lines(unsigned int num_lines, unsigned int* num_stations_per_line);
 unsigned int* get_num_trains_per_line(unsigned int num_lines);
-void run_train();
 
 void read_inputs(const unsigned int NUM_LINES, unsigned int *num_stations, char ***station_names,
         unsigned int ***link_costs, float **station_popularity_list, char ****stations_in_lines,
@@ -102,6 +101,12 @@ int main() {
     omp_lock_t** train_lock_ptrs = malloc(sizeof(omp_lock_t*) * total_num_trains);
     for (unsigned int i = 0; i < total_num_trains; i++) {
         train_lock_ptrs[i] = NULL;
+    }
+
+    // Model Problem for Part 2
+    StationWait* station_waits = malloc(sizeof(StationWait) * (num_stations * 2));
+    for (unsigned int i = 0; i < num_stations; i++) {
+        station_waits[i] = (StationWait){0, 0xFFFFFFFF, 0, 0, 0};
     }
 
     omp_set_num_threads(total_num_trains);
