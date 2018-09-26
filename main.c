@@ -1,8 +1,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <omp.h>
+#include <time.h>
 #include "LineNetwork.h"
 #include "Train.h"
+#include "StationWait.h"
 
 #define STATION_NAMES_BUFFER_SIZE 8196
 #define STATION_NAME_BUFFER_SIZE 256
@@ -12,7 +15,10 @@ unsigned int** get_station_link_costs(unsigned int num_stations);
 float* get_station_popularity(unsigned int num_stations);
 char*** get_stations_in_lines(unsigned int num_lines, unsigned int* num_stations_per_line);
 unsigned int* get_num_trains_per_line(unsigned int num_lines);
-void run_train();
+
+void read_inputs(const unsigned int NUM_LINES, unsigned int *num_stations, char ***station_names,
+        unsigned int ***link_costs, float **station_popularity_list, char ****stations_in_lines,
+        unsigned int **num_stations_per_line, unsigned int *num_ticks, unsigned int **num_trains_per_line);
 
 int main() {
     const unsigned int TRAIN_SPEED = 1;
@@ -22,66 +28,32 @@ int main() {
     const char* LINK_PRINT_TEMPLATE = "%c%u-s%u->s%u";
     const char* TIME_UPDATE_PREFIX = "%u: ";
 
+    int STATION_WAITING_RANGE = 10;
+    int STATION_WAITING_MIN = 1;
+
+    srand((unsigned) time(NULL));
+
     unsigned int num_stations;
-    scanf("%u\n", &num_stations);
-    printf("%u\n", num_stations);
-
-    char raw_stations_string[STATION_NAMES_BUFFER_SIZE];
-    scanf("%s", raw_stations_string);
-
-    char** station_names = NULL;
-    station_names = get_station_names(raw_stations_string, num_stations);
-    for (int i = 0; i < num_stations; i++) {
-        printf("%s,", station_names[i]);
-    }
-    printf("\n");
-
-    unsigned int** link_costs = NULL;
-    link_costs = get_station_link_costs(num_stations);
-    for (int i = 0; i < num_stations; i++) {
-        for (int j = 0; j < num_stations; j++) {
-            printf("%u ", link_costs[i][j]);
-        }
-        printf("\n");
-    }
-
-    float* station_popularity_list = NULL;
-    station_popularity_list = get_station_popularity(num_stations);
-    for (int i = 0; i < num_stations; i++) {
-        printf("%f,", station_popularity_list[i]);
-    }
-    printf("\n");
-
-    char*** stations_in_lines = NULL;
-    unsigned int* num_stations_per_line = malloc(NUM_LINES * sizeof(unsigned int));
-    stations_in_lines = get_stations_in_lines(NUM_LINES, num_stations_per_line);
-    for (unsigned int i = 0; i < NUM_LINES; i++) {
-        for (unsigned int j = 0; j < num_stations_per_line[i]; j++) {
-            printf("%s,", stations_in_lines[i][j]);
-        }
-        printf("%u\n", num_stations_per_line[i]);
-    }
-
+    char **station_names;
+    unsigned int **link_costs;
+    float *station_popularity;
+    char ***stations_in_lines;
+    unsigned int *num_stations_per_line;
     unsigned int num_ticks;
-    scanf("%d", &num_ticks);
-    printf("%d\n", num_ticks);
+    unsigned int *num_trains_per_line;
 
-    unsigned int* num_trains_per_line = NULL;
-    num_trains_per_line = get_num_trains_per_line(NUM_LINES);
-    for (int i = 0; i < NUM_LINES; i++) {
-        printf("%d,",num_trains_per_line[i]);
-    }
-    printf("\n");
+    read_inputs(NUM_LINES, &num_stations, &station_names, &link_costs, &station_popularity, &stations_in_lines,
+                &num_stations_per_line, &num_ticks, &num_trains_per_line);
 
     ///////////////////
     // Model Problem //
     ///////////////////
 
-
     LineNetwork** networks = malloc(sizeof(LineNetwork*) * NUM_LINES);
     for (unsigned int i = 0; i < NUM_LINES; i++) {
         networks[i] = get_line_network(stations_in_lines[i], station_names, num_stations, num_stations_per_line[i]);
     }
+
     for (int i = 0; i < NUM_LINES; i++) {
         for (int j = 0; j < networks[i]->num_nodes; j++) {
             printf("%u,", networks[i]->station_numbers[j]);
@@ -89,74 +61,234 @@ int main() {
         printf("\n");
     }
 
-    Train** trains = malloc(sizeof(Train*) * NUM_LINES);
+    // Each thread represents a train.
+    unsigned int total_num_trains = 0;
     for (unsigned int i = 0; i < NUM_LINES; i++) {
-        trains[i] = malloc(sizeof(Train) * num_trains_per_line[i]);
+        total_num_trains += num_trains_per_line[i];
+    }
+
+    Train* trains = malloc(sizeof(Train) * total_num_trains);
+    unsigned int count = 0;
+    for (unsigned int i = 0; i < NUM_LINES; i++) {
         for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-            trains[i][j] = (Train){i, j, 0, STATION};
+            trains[count++] = (Train){i, j, (j % 2 == 0) ? 0 : (num_stations_per_line[i]), 1, STATION, 0};
         }
     }
-    
+
+
+    char** have_trains_acted;
+    have_trains_acted = malloc(sizeof(char*) * NUM_LINES);
+    for (unsigned int i = 0; i < NUM_LINES; i++) {
+        have_trains_acted[i] = malloc(sizeof(char) * num_trains_per_line[i]);
+    }
+
+    // Create mutexes for locking the link between each station.
+    omp_lock_t** link_mutexes = malloc(sizeof(omp_lock_t*) * num_stations);
+    for (unsigned int i = 0; i < num_stations; i++) {
+        link_mutexes[i] = malloc(sizeof(omp_lock_t) * num_stations);
+        for (unsigned int j = 0; j < num_stations; j++) {
+            omp_init_lock(&link_mutexes[i][j]);
+        }
+    }
+
+    // Create mutexes for locking the loading of each station.
+    omp_lock_t* station_loading_lock = malloc(sizeof(omp_lock_t) * num_stations * 2);
+    for (unsigned int i = 0; i < (num_stations * 2); i++) {
+        omp_init_lock(&station_loading_lock[i]);
+    }
+
+    // Denotes pointers owned by trains.
+    omp_lock_t** train_lock_ptrs = malloc(sizeof(omp_lock_t*) * total_num_trains);
+    for (unsigned int i = 0; i < total_num_trains; i++) {
+        train_lock_ptrs[i] = NULL;
+    }
+
+    // Model Problem for Part 2
+    StationWait* station_waits = malloc(sizeof(StationWait) * num_stations * 2);
+    for (unsigned int i = 0; i < num_stations; i++) {
+        station_waits[i] = (StationWait){0.0, (unsigned int) 0xFFFFFFFF, 0, 0, 0};
+    }
+
+    omp_set_num_threads(total_num_trains);
+    // omp_set_dynamic(0);
+
+
     for (unsigned int t = 0; t < num_ticks; t++) {
-        for (unsigned int i = 0; i < NUM_LINES; i++) {
-            for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
 
-                // Perform train operations here.
-                trains[i][j].time_left -= 1;
+        #pragma omp parallel for num_threads(total_num_trains)
+        for (unsigned int i = 0; i < total_num_trains; i++) {
+            // printf("Openmp inner threads %d\n", omp_get_thread_num());
 
-                if (trains[i][j].time_left <= 0) {
-                    // Perform transitions here.
-                    unsigned int next_loc = get_next_node_index(networks[i], trains[i][j].line_idx);
-                    unsigned int next_station_idx = get_station_number(networks[i], next_loc);
+            // Step 1: Update trains that previously acquired locks but are have their time limit exceeded
+            if ((trains[i].loc == OPENING) || (trains[i].loc == LINK)) {
 
+                // Release lock and transition
+                if (trains[i].time_left <= 0) {
+                    unsigned int next_node = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_node);
 
-                    if (trains[i][j].loc == STATION) {
-                        unsigned int curr_station_idx = get_station_number(networks[i], trains[i][j].loc);
-                        trains[i][j].time_left = link_costs[curr_station_idx][next_station_idx];
-                        trains[i][j].loc = LINK;
+                    unsigned int station_wait_idx = curr_station_idx +
+                            (is_reverse_direction(networks[trains[i].network_idx], trains[i].line_idx) ? num_stations : 0);
+                    train_leave(t, &station_waits[station_wait_idx]);
+                    if ((trains[i].loc == OPENING) && (curr_station_idx != next_station_idx)) {
+                        // Finish serving commuters at the station.
+                        trains[i].loc = OPENED;
                     } else {
-                        trains[i][j].line_idx = next_loc;
-                        trains[i][j].time_left = rand() * station_popularity_list[next_station_idx];
-                        trains[i][j].loc = STATION;
+                        // Finish the line so proceed to the next link in the network.
+                        trains[i].loc = STATION;
+                        trains[i].line_idx = next_node;
                     }
+
+                    omp_lock_t *lock_ptr = train_lock_ptrs[i];
+                    train_lock_ptrs[i] = NULL;
+                    omp_unset_lock(lock_ptr);
                 }
             }
         }
 
+        #pragma omp parallel for num_threads(total_num_trains)
+        for (unsigned int i = 0; i < total_num_trains; i++) {
+            // Step 2: Trains holding lock release first if possible.
+            if ((trains[i].loc == OPENING) || (trains[i].loc == LINK)) {
+                trains[i].time_left -= 1;
+
+                // Release lock and transition
+                if (trains[i].time_left <= 0) {
+
+                    unsigned int next_node = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_node);
+
+                    unsigned int station_wait_idx = curr_station_idx +
+                            (is_reverse_direction(networks[trains[i].network_idx], trains[i].line_idx) ? num_stations : 0);
+                    train_leave(t, &station_waits[station_wait_idx]);
+
+                    if ((trains[i].loc == OPENING) && (curr_station_idx != next_station_idx)) {
+                        // Finish serving commuters at the station.
+                        trains[i].loc = OPENED;
+                    } else {
+                        // Finish the line so proceed to the next link in the network.
+                        trains[i].loc = STATION;
+                        trains[i].line_idx = next_node;
+                    }
+                    omp_lock_t *lock_ptr = train_lock_ptrs[i];
+                    train_lock_ptrs[i] = NULL;
+                    omp_unset_lock(lock_ptr);
+                }
+
+                trains[i].hasActed = 1;
+            }
+        }
+
+        #pragma omp parallel for num_threads(total_num_trains)
+        for (unsigned int i = 0; i < total_num_trains; i++) {
+            // Step 3: Other trains acquire lock if possible and make move.
+
+            if (!trains[i].hasActed && (trains[i].train_idx < ((t+1) * 2))) {
+                if (trains[i].loc == STATION) {
+                    // Try to occupy the station's lock
+                    unsigned int station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int station_num = station_idx;
+                    station_idx += is_reverse_direction(&networks[trains[i].network_idx], station_idx) ? num_stations : 0;
+
+                    unsigned int station_wait_idx = station_idx;
+                    train_arrive(t, &station_waits[station_wait_idx]);
+
+                    omp_lock_t* lock_ptr = &station_loading_lock[station_idx];
+                    if (omp_test_lock(lock_ptr)) {
+                        // Successfully acquired lock, begin loading
+                        // printf("%u acquired semaphore\n", i);
+                        trains[i].loc = OPENING;
+                        trains[i].time_left = station_popularity[station_num] *
+                                ((float) ((rand() % STATION_WAITING_RANGE) + STATION_WAITING_MIN)) - 1;
+                        train_lock_ptrs[i] = lock_ptr;
+                    }
+
+                } else if (trains[i].loc == OPENED) {
+                    unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int next_loc = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_loc);
+                    // printf("%u acquired LINK semaphore\n", i);
+                    omp_lock_t* link_loc_ptr = &link_mutexes[curr_station_idx][next_station_idx];
+                    if (omp_test_lock(link_loc_ptr)) {
+                        // Suceessfully acquired lock.
+                        trains[i].loc = LINK;
+                        train_lock_ptrs[i] = link_loc_ptr;
+                        trains[i].time_left = link_costs[curr_station_idx][next_station_idx] - 1;
+                    }
+                }
+
+                trains[i].hasActed = 1;
+            }
+
+            trains[i].hasActed = 0; // Reset hasActed for the next iteration
+        }
 
         // I decide not to use multithreading for printing to console since it is a simple operation
         // Further multithreading might cause more overhead and printing to console is not very fast.
         printf(TIME_UPDATE_PREFIX, t);
-        for (unsigned int i = 0; i < NUM_LINES; i++) {
-            for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-                unsigned int current_station_idx = get_station_number(networks[i], trains[i][j].loc);
-                if (trains[i][j].loc == STATION) {
-                    printf(STATION_PRINT_TEMPLATE, LINE_PREFIXES[i], j, current_station_idx);
-                } else {
-                    unsigned int next_loc = get_next_node_index(networks[i], trains[i][j].loc);
-                    unsigned int next_station_idx = get_station_number(networks[i], next_loc);
-                    printf(LINK_PRINT_TEMPLATE, LINE_PREFIXES[i], j, current_station_idx, next_station_idx);
-                }
-                if (i != (NUM_LINES - 1) && j != (num_trains_per_line[i] - 1)) {
-                    printf(", ");
-                }
+        for (unsigned int i = 0; i < total_num_trains; i++) {
+            if (trains[i].train_idx >= (t+1) * 2) {
+                continue;
+            }
+
+            unsigned int current_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+            if ((trains[i].loc == STATION) || (trains[i].loc == OPENING) || (trains[i].loc == OPENED)) {
+                printf(STATION_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].network_idx], trains[i].train_idx, current_station_idx);
+            } else {
+                unsigned int next_loc = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_loc);
+                printf(LINK_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].network_idx], trains[i].train_idx, current_station_idx, next_station_idx);
+            }
+            if (i != (total_num_trains - 1)) {
+                printf(", ");
             }
         }
         printf("\n");
     }
 
     // Final Update here.
+    for (unsigned int i = 0; i < NUM_LINES; i++) {
+        unsigned int average_waiting_time = 0;
+        unsigned int num_waiting_count = 0;
+        unsigned int total_min = 0;
+        unsigned int total_max = 0;
+        unsigned int total_valid_minmax = 0;
+        for (unsigned int j = 0; j < ((*networks[i]).num_nodes / 2); j++) {
+            unsigned int station_num = get_station_idx(networks[i], j);
+            StationWait station_wait = station_waits[station_num];
+            if (station_wait.num_trains_arrive > 0) {
+                average_waiting_time += station_wait.total_wait_time;
+                num_waiting_count += station_wait.num_trains_arrive;
+                total_min += station_wait.min_wait_time;
+                total_max += station_wait.max_wait_time;
+                total_valid_minmax++;
+            }
+        }
+        printf("%.2f %.2f %.2f\n", average_waiting_time / ((float) num_waiting_count), total_min / ((float) total_valid_minmax), total_max / ((float) total_valid_minmax));
+    }
 
 
 
     ////////////////////////////////////
     // Clean up memory on termination //
     ////////////////////////////////////
-    for (int i = 0; i < NUM_LINES; i++) {
-        free(trains[i]);
+    free(train_lock_ptrs);
+    train_lock_ptrs = NULL;
+
+    free(station_loading_lock);
+    station_loading_lock = NULL;
+
+    for (unsigned int i = 0; i < num_stations; i++) {
+        free(link_mutexes[i]);
     }
+    free(link_mutexes);
+    link_mutexes = NULL;
+
     free(trains);
     trains = NULL;
+
 
     for (unsigned int i = 0; i < NUM_LINES; i++) {
         delete_line_network(networks[i]);
@@ -187,10 +319,62 @@ int main() {
     free(link_costs);
     link_costs = NULL;
 
-    free(station_popularity_list);
-    station_popularity_list = NULL;
+    free(station_popularity);
+    station_popularity = NULL;
 
     return EXIT_SUCCESS;
+}
+
+void read_inputs(const unsigned int NUM_LINES, unsigned int *num_stations, char ***station_names,
+        unsigned int ***link_costs, float **station_popularity_list, char ****stations_in_lines,
+        unsigned int **num_stations_per_line, unsigned int *num_ticks, unsigned int **num_trains_per_line) {
+
+    (*station_names) = NULL;
+    (*link_costs) = NULL;
+    (*station_popularity_list) = NULL;
+    (*stations_in_lines) = NULL;
+    (*num_stations_per_line) = malloc(NUM_LINES * sizeof(unsigned int));
+    (*num_trains_per_line) = NULL;
+    scanf("%u\n", num_stations);
+    printf("%u\n", (*num_stations));
+
+    char raw_stations_string[STATION_NAMES_BUFFER_SIZE];
+    scanf("%s", raw_stations_string);
+    (*station_names) = get_station_names(raw_stations_string, (*num_stations));
+    for (int i = 0; i < (*num_stations); i++) {
+        printf("%s,", (*station_names)[i]);
+    }
+    printf("\n");
+
+    (*link_costs) = get_station_link_costs((*num_stations));
+    for (int i = 0; i < (*num_stations); i++) {
+        for (int j = 0; j < (*num_stations); j++) {
+            printf("%u ", (*link_costs)[i][j]);
+        }
+        printf("\n");
+    }
+
+    (*station_popularity_list) = get_station_popularity((*num_stations));
+    for (int i = 0; i < (*num_stations); i++) {
+        printf("%f,", (*station_popularity_list)[i]);
+    }
+    printf("\n");
+
+    (*stations_in_lines) = get_stations_in_lines(NUM_LINES, (*num_stations_per_line));
+    for (unsigned int i = 0; i < NUM_LINES; i++) {
+        for (unsigned int j = 0; j < (*num_stations_per_line)[i]; j++) {
+            printf("%s,", (*stations_in_lines)[i][j]);
+        }
+        printf("%u\n", (*num_stations_per_line)[i]);
+    }
+
+    scanf("%d", num_ticks);
+    printf("%d\n", (*num_ticks));
+    (*num_trains_per_line) = get_num_trains_per_line(NUM_LINES);
+    for (int i = 0; i < NUM_LINES; i++) {
+        printf("%d,", (*num_trains_per_line)[i]);
+    }
+    printf("\n");
 }
 
 unsigned int* get_num_trains_per_line(unsigned int num_lines)

@@ -14,11 +14,12 @@ typedef struct {
 } LineNetwork;
 
 unsigned int get_next_node_index(LineNetwork* network, unsigned int index);
-unsigned int get_station_number(LineNetwork* network, unsigned int index);
+unsigned int get_station_idx(LineNetwork *network, unsigned int index);
 LineNetwork* get_line_network(
         char** line_station_names,
         char** all_station_names,
         unsigned int num_stations,
         unsigned int num_stations_in_line
 );
+unsigned char is_reverse_direction(LineNetwork* network, unsigned int index);
 void delete_line_network(LineNetwork* network);
