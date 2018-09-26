@@ -92,8 +92,8 @@ int main() {
     }
 
     // Create mutexes for locking the loading of each station.
-    omp_lock_t* station_loading_lock = malloc(sizeof(omp_lock_t) * num_stations);
-    for (unsigned int i = 0; i < num_stations; i++) {
+    omp_lock_t* station_loading_lock = malloc(sizeof(omp_lock_t) * num_stations * 2);
+    for (unsigned int i = 0; i < (num_stations * 2); i++) {
         omp_init_lock(&station_loading_lock[i]);
     }
 
@@ -113,7 +113,6 @@ int main() {
     // omp_set_dynamic(0);
 
 
-    // printf("total trains %u",total_num_trains);
     for (unsigned int t = 0; t < num_ticks; t++) {
 
         #pragma omp parallel for num_threads(total_num_trains)
@@ -127,15 +126,18 @@ int main() {
                     omp_lock_t *lock_ptr = train_lock_ptrs[i];
                     train_lock_ptrs[i] = NULL;
                     omp_unset_lock(lock_ptr);
+                    unsigned int next_node = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_node);
 
 
-                    if (trains[i].loc == OPENING) {
+                    if ((trains[i].loc == OPENING) && (curr_station_idx != next_station_idx)) {
                         // Finish serving commuters at the station.
                         trains[i].loc = OPENED;
                     } else {
                         // Finish the line so proceed to the next link in the network.
                         trains[i].loc = STATION;
-                        trains[i].line_idx = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                        trains[i].line_idx = next_node;
                     }
                 }
             }
@@ -153,13 +155,17 @@ int main() {
                     train_lock_ptrs[i] = NULL;
                     omp_unset_lock(lock_ptr);
 
-                    if (trains[i].loc == OPENING) {
+                    unsigned int next_node = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_node);
+
+                    if ((trains[i].loc == OPENING) && (curr_station_idx != next_station_idx)) {
                         // Finish serving commuters at the station.
                         trains[i].loc = OPENED;
                     } else {
                         // Finish the line so proceed to the next link in the network.
                         trains[i].loc = STATION;
-                        trains[i].line_idx = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
+                        trains[i].line_idx = next_node;
                     }
                 }
 
