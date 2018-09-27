@@ -14,7 +14,7 @@ typedef struct {
 } LineNetwork;
 
 unsigned int get_next_node_idx(LineNetwork *network, unsigned int index);
-unsigned int get_station_id(LineNetwork *network, unsigned int index);
+unsigned int get_station_idx(LineNetwork *network, unsigned int index);
 LineNetwork* get_line_network(
         char** line_station_names,
         char** all_station_names,

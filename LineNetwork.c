@@ -21,7 +21,7 @@ unsigned char is_reverse_direction(LineNetwork* network, unsigned int index) {
 /**
  * Gets the station number of a train at the current index in the train network.
  * */
-unsigned int get_station_id(LineNetwork *network, unsigned int index) {
+unsigned int get_station_idx(LineNetwork *network, unsigned int index) {
     return network->station_numbers[index];
 }
 
@@ -52,7 +52,7 @@ LineNetwork* get_line_network(
     }
 
     for (unsigned int i = 0; i < num_stations_in_line; i++) {
-        station_nums[i + num_stations_in_line] = station_nums[num_stations_in_line - 1 - i];
+        station_nums[i + num_stations_in_line] = station_nums[num_stations_in_line - 1 - i] + num_stations;
     }
 
     LineNetwork* network = malloc(sizeof(LineNetwork));
