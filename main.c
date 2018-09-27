@@ -48,7 +48,6 @@ int main() {
     ///////////////////
     // Model Problem //
     ///////////////////
-
     LineNetwork** networks = malloc(sizeof(LineNetwork*) * NUM_LINES);
     for (unsigned int i = 0; i < NUM_LINES; i++) {
         networks[i] = get_line_network(stations_in_lines[i], station_names, num_stations, num_stations_per_line[i]);
@@ -71,15 +70,8 @@ int main() {
     unsigned int count = 0;
     for (unsigned int i = 0; i < NUM_LINES; i++) {
         for (unsigned int j = 0; j < num_trains_per_line[i]; j++) {
-            trains[count++] = (Train){i, j, (j % 2 == 0) ? 0 : (num_stations_per_line[i]), 1, STATION, 0};
+            trains[count++] = (Train){i, j, (j % 2 == 0) ? 0 : (num_stations_per_line[i]), 1, WAIT_TO_LOAD, 0};
         }
-    }
-
-
-    char** have_trains_acted;
-    have_trains_acted = malloc(sizeof(char*) * NUM_LINES);
-    for (unsigned int i = 0; i < NUM_LINES; i++) {
-        have_trains_acted[i] = malloc(sizeof(char) * num_trains_per_line[i]);
     }
 
     // Create mutexes for locking the link between each station.
@@ -117,29 +109,30 @@ int main() {
 
         #pragma omp parallel for num_threads(total_num_trains)
         for (unsigned int i = 0; i < total_num_trains; i++) {
-            // printf("Openmp inner threads %d\n", omp_get_thread_num());
 
             // Step 1: Update trains that previously acquired locks but are have their time limit exceeded
-            if ((trains[i].loc == OPENING) || (trains[i].loc == LINK)) {
+            if ((trains[i].train_status == LOADING) || (trains[i].train_status == LINK)) {
 
                 // Release lock and transition
                 if (trains[i].time_left <= 0) {
-                    unsigned int next_node = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
-                    unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
-                    unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_node);
+                    unsigned int next_node_idx = get_next_node_idx(networks[trains[i].line_id], trains[i].node_idx);
+                    unsigned int curr_station_id = get_station_id(networks[trains[i].line_id], trains[i].node_idx);
+                    unsigned int next_station_id = get_station_id(networks[trains[i].line_id], next_node_idx);
+                    unsigned int station_wait_idx = curr_station_id +
+                            (is_reverse_direction(networks[trains[i].line_id], trains[i].node_idx) ? num_stations : 0);
 
-                    unsigned int station_wait_idx = curr_station_idx +
-                            (is_reverse_direction(networks[trains[i].network_idx], trains[i].line_idx) ? num_stations : 0);
                     train_leave(t, &station_waits[station_wait_idx]);
-                    if ((trains[i].loc == OPENING) && (curr_station_idx != next_station_idx)) {
+
+                    if ((trains[i].train_status == LOADING) && (curr_station_id != next_station_id)) {
                         // Finish serving commuters at the station.
-                        trains[i].loc = OPENED;
+                        trains[i].train_status = LOADED;
                     } else {
                         // Finish the line so proceed to the next link in the network.
-                        trains[i].loc = STATION;
-                        trains[i].line_idx = next_node;
+                        trains[i].train_status = WAIT_TO_LOAD;
+                        trains[i].node_idx = next_node_idx;
                     }
 
+                    // Release lock
                     omp_lock_t *lock_ptr = train_lock_ptrs[i];
                     train_lock_ptrs[i] = NULL;
                     omp_unset_lock(lock_ptr);
@@ -147,50 +140,55 @@ int main() {
             }
         }
 
+        // Implicit barrier
         #pragma omp parallel for num_threads(total_num_trains)
         for (unsigned int i = 0; i < total_num_trains; i++) {
+
             // Step 2: Trains holding lock release first if possible.
-            if ((trains[i].loc == OPENING) || (trains[i].loc == LINK)) {
+            if ((trains[i].train_status == LOADING) || (trains[i].train_status == LINK)) {
                 trains[i].time_left -= 1;
 
                 // Release lock and transition
                 if (trains[i].time_left <= 0) {
 
-                    unsigned int next_node = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
-                    unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
-                    unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_node);
+                    unsigned int next_node_idx = get_next_node_idx(networks[trains[i].line_id], trains[i].node_idx);
+                    unsigned int curr_station_id = get_station_id(networks[trains[i].line_id], trains[i].node_idx);
+                    unsigned int next_station_id = get_station_id(networks[trains[i].line_id], next_node_idx);
+                    unsigned int station_wait_idx = curr_station_id +
+                            (is_reverse_direction(networks[trains[i].line_id], trains[i].node_idx) ? num_stations : 0);
 
-                    unsigned int station_wait_idx = curr_station_idx +
-                            (is_reverse_direction(networks[trains[i].network_idx], trains[i].line_idx) ? num_stations : 0);
                     train_leave(t, &station_waits[station_wait_idx]);
 
-                    if ((trains[i].loc == OPENING) && (curr_station_idx != next_station_idx)) {
+                    if ((trains[i].train_status == LOADING) && (curr_station_id != next_station_id)) {
                         // Finish serving commuters at the station.
-                        trains[i].loc = OPENED;
+                        trains[i].train_status = LOADED;
                     } else {
                         // Finish the line so proceed to the next link in the network.
-                        trains[i].loc = STATION;
-                        trains[i].line_idx = next_node;
+                        trains[i].train_status = WAIT_TO_LOAD;
+                        trains[i].node_idx = next_node_idx;
                     }
+
+                    // Release lock
                     omp_lock_t *lock_ptr = train_lock_ptrs[i];
                     train_lock_ptrs[i] = NULL;
                     omp_unset_lock(lock_ptr);
                 }
 
-                trains[i].hasActed = 1;
+                trains[i].has_acted = 1;
             }
         }
 
+        // implicit barrier
         #pragma omp parallel for num_threads(total_num_trains)
         for (unsigned int i = 0; i < total_num_trains; i++) {
             // Step 3: Other trains acquire lock if possible and make move.
 
-            if (!trains[i].hasActed && (trains[i].train_idx < ((t+1) * 2))) {
-                if (trains[i].loc == STATION) {
+            if (!trains[i].has_acted && (trains[i].train_id < ((t+1) * 2))) {
+                if (trains[i].train_status == WAIT_TO_LOAD) {
                     // Try to occupy the station's lock
-                    unsigned int station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
+                    unsigned int station_idx = get_station_id(networks[trains[i].line_id], trains[i].node_idx);
                     unsigned int station_num = station_idx;
-                    station_idx += is_reverse_direction(&networks[trains[i].network_idx], station_idx) ? num_stations : 0;
+                    station_idx += is_reverse_direction(&networks[trains[i].line_id], station_idx) ? num_stations : 0;
 
                     unsigned int station_wait_idx = station_idx;
                     train_arrive(t, &station_waits[station_wait_idx]);
@@ -199,47 +197,47 @@ int main() {
                     if (omp_test_lock(lock_ptr)) {
                         // Successfully acquired lock, begin loading
                         // printf("%u acquired semaphore\n", i);
-                        trains[i].loc = OPENING;
+                        trains[i].train_status = LOADING;
                         trains[i].time_left = station_popularity[station_num] *
                                 ((float) ((rand() % STATION_WAITING_RANGE) + STATION_WAITING_MIN)) - 1;
                         train_lock_ptrs[i] = lock_ptr;
                     }
 
-                } else if (trains[i].loc == OPENED) {
-                    unsigned int curr_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
-                    unsigned int next_loc = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
-                    unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_loc);
+                } else if (trains[i].train_status == LOADED) {
+                    unsigned int curr_station_idx = get_station_id(networks[trains[i].line_id], trains[i].node_idx);
+                    unsigned int next_loc = get_next_node_idx(networks[trains[i].line_id], trains[i].node_idx);
+                    unsigned int next_station_idx = get_station_id(networks[trains[i].line_id], next_loc);
                     // printf("%u acquired LINK semaphore\n", i);
                     omp_lock_t* link_loc_ptr = &link_mutexes[curr_station_idx][next_station_idx];
                     if (omp_test_lock(link_loc_ptr)) {
                         // Suceessfully acquired lock.
-                        trains[i].loc = LINK;
+                        trains[i].train_status = LINK;
                         train_lock_ptrs[i] = link_loc_ptr;
                         trains[i].time_left = link_costs[curr_station_idx][next_station_idx] - 1;
                     }
                 }
 
-                trains[i].hasActed = 1;
+                trains[i].has_acted = 1;
             }
 
-            trains[i].hasActed = 0; // Reset hasActed for the next iteration
+            trains[i].has_acted = 0; // Reset has_acted for the next iteration
         }
 
         // I decide not to use multithreading for printing to console since it is a simple operation
         // Further multithreading might cause more overhead and printing to console is not very fast.
         printf(TIME_UPDATE_PREFIX, t);
         for (unsigned int i = 0; i < total_num_trains; i++) {
-            if (trains[i].train_idx >= (t+1) * 2) {
+            if (trains[i].train_id >= (t+1) * 2) {
                 continue;
             }
 
-            unsigned int current_station_idx = get_station_idx(networks[trains[i].network_idx], trains[i].line_idx);
-            if ((trains[i].loc == STATION) || (trains[i].loc == OPENING) || (trains[i].loc == OPENED)) {
-                printf(STATION_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].network_idx], trains[i].train_idx, current_station_idx);
+            unsigned int current_station_idx = get_station_id(networks[trains[i].line_id], trains[i].node_idx);
+            if ((trains[i].train_status == WAIT_TO_LOAD) || (trains[i].train_status == LOADING) || (trains[i].train_status == LOADED)) {
+                printf(STATION_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].line_id], trains[i].train_id, current_station_idx);
             } else {
-                unsigned int next_loc = get_next_node_index(networks[trains[i].network_idx], trains[i].line_idx);
-                unsigned int next_station_idx = get_station_idx(networks[trains[i].network_idx], next_loc);
-                printf(LINK_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].network_idx], trains[i].train_idx, current_station_idx, next_station_idx);
+                unsigned int next_loc = get_next_node_idx(networks[trains[i].line_id], trains[i].node_idx);
+                unsigned int next_station_idx = get_station_id(networks[trains[i].line_id], next_loc);
+                printf(LINK_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].line_id], trains[i].train_id, current_station_idx, next_station_idx);
             }
             if (i != (total_num_trains - 1)) {
                 printf(", ");
@@ -256,7 +254,7 @@ int main() {
         unsigned int total_max = 0;
         unsigned int total_valid_minmax = 0;
         for (unsigned int j = 0; j < ((*networks[i]).num_nodes / 2); j++) {
-            unsigned int station_num = get_station_idx(networks[i], j);
+            unsigned int station_num = get_station_id(networks[i], j);
             StationWait station_wait = station_waits[station_num];
             if (station_wait.num_trains_arrive > 0) {
                 average_waiting_time += station_wait.total_wait_time;

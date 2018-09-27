@@ -8,13 +8,12 @@
 #endif //CS3210_ASSIGNMENT1_STATIONWAIT_H
 
 typedef struct {
-    float total_wait_time;// = 0;
-    unsigned int min_wait_time;// = 0xFFFFFFFF; // hex code for maximum value that can be represented by 32 bits.
-    unsigned int max_wait_time;// = 0;
-    unsigned int num_trains_arrive;// = 0;
-    unsigned int prev_time_stamp;// = 0;
+    float total_wait_time;
+    unsigned int min_wait_time;
+    unsigned int max_wait_time;
+    unsigned int num_trains_arrive;
+    unsigned int prev_time_stamp;
 } StationWait;
 
 void train_arrive(unsigned int time, StationWait* station_wait);
 void train_leave(unsigned int time, StationWait* stationWait);
-StationWait* get_station_wait();

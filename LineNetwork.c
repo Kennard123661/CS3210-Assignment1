@@ -9,7 +9,7 @@
 /**
  * Gets the next node index location.
  * */
-unsigned int get_next_node_index(LineNetwork* network, unsigned int index)
+unsigned int get_next_node_idx(LineNetwork *network, unsigned int index)
 {
     return (index + 1) % network->num_nodes;
 }
@@ -21,7 +21,7 @@ unsigned char is_reverse_direction(LineNetwork* network, unsigned int index) {
 /**
  * Gets the station number of a train at the current index in the train network.
  * */
-unsigned int get_station_idx(LineNetwork *network, unsigned int index) {
+unsigned int get_station_id(LineNetwork *network, unsigned int index) {
     return network->station_numbers[index];
 }
 

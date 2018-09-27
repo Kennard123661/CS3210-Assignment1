@@ -7,13 +7,13 @@
 
 #endif //CS3210_ASSIGNMENT1_TRAIN_H
 
-enum train_loc {STATION, LINK, OPENING, OPENED};
+enum TrainStatus {WAIT_TO_LOAD, LOADING, LOADED, LINK};
 
 typedef struct {
-    unsigned int network_idx;
-    unsigned int train_idx;
-    unsigned int line_idx;
+    unsigned int line_id;
+    unsigned int train_id;
+    unsigned int node_idx;
     float time_left;
-    enum train_loc loc;
-    unsigned char hasActed;
+    enum TrainStatus train_status;
+    unsigned char has_acted;
 } Train;
