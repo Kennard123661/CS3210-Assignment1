@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <omp.h>
 #include <time.h>
+#include <zconf.h>
 #include "LineNetwork.h"
 #include "Train.h"
 #include "StationWait.h"
@@ -27,6 +28,8 @@ int main() {
     const char* STATION_PRINT_TEMPLATE = "%c%u-s%u";
     const char* LINK_PRINT_TEMPLATE = "%c%u-s%u->s%u";
     const char* TIME_UPDATE_PREFIX = "%u: ";
+    const char* FINAL_UPDATE_STRING = "Average waiting times:\n";
+    const char* LINE_NAMES[] = {"green", "yellow", "blue"};
 
     int STATION_WAITING_RANGE = 10;
     int STATION_WAITING_MIN = 1;
@@ -98,9 +101,12 @@ int main() {
     }
 
     // Model Problem for Part 2
-    StationWait* station_waits = malloc(sizeof(StationWait) * num_station_sides);
-    for (unsigned int i = 0; i < num_stations; i++) {
-        station_waits[i] = (StationWait){0.0, (unsigned int) 0xFFFFFFFF, 0, 0, 0};
+    StationWait** station_waits = malloc(sizeof(StationWait*) * num_station_sides);
+    for (unsigned int i = 0; i < NUM_LINES; i++) {
+        station_waits[i] = malloc(sizeof(StationWait) * num_station_sides);
+        for (unsigned int j = 0; j < num_station_sides; j++) {
+            station_waits[i][j] = (StationWait) {0, UINT_MAX, 0, 0, 0};
+        }
     }
 
     omp_set_num_threads(total_num_trains);
@@ -121,7 +127,7 @@ int main() {
                     unsigned int curr_station_idx = get_station_idx(networks[trains[i].line_id], trains[i].node_idx);
                     unsigned int next_station_idx = get_station_idx(networks[trains[i].line_id], next_node_idx);
 
-                    train_leave(t, &station_waits[curr_station_idx]);
+                    train_leave(t, &station_waits[trains[i].line_id][curr_station_idx]);
 
                     if ((trains[i].train_status == LOADING) && (curr_station_idx != (next_station_idx - num_stations))) {
                         // Finish serving commuters at the station.
@@ -155,7 +161,7 @@ int main() {
                     unsigned int curr_station_idx = get_station_idx(networks[trains[i].line_id], trains[i].node_idx);
                     unsigned int next_station_idx = get_station_idx(networks[trains[i].line_id], next_node_idx);
 
-                    train_leave(t, &station_waits[curr_station_idx]);
+                    train_leave(t, &station_waits[trains[i].line_id][curr_station_idx]);
 
                     if ((trains[i].train_status == LOADING) && (curr_station_idx != (next_station_idx - num_stations))) {
                         // Finish serving commuters at the station.
@@ -192,7 +198,7 @@ int main() {
                         trains[i].time_left = station_popularity[station_idx] *
                                 ((float) ((rand() % STATION_WAITING_RANGE) + STATION_WAITING_MIN)) - 1;
                         train_lock_ptrs[i] = lock_ptr;
-                        train_arrive(t, &station_waits[station_idx]);
+                        train_arrive(t, &station_waits[trains[i].line_id][station_idx]);
                     }
 
                 } else if (trains[i].train_status == LOADED) {
@@ -237,7 +243,8 @@ int main() {
             }
 
 
-            if ((trains[i].train_status == WAIT_TO_LOAD) || (trains[i].train_status == LOADING) || (trains[i].train_status == LOADED)) {
+            if ((trains[i].train_status == WAIT_TO_LOAD) || (trains[i].train_status == LOADING)
+                || (trains[i].train_status == LOADED)) {
                 printf(STATION_PRINT_TEMPLATE, LINE_PREFIXES[trains[i].line_id], trains[i].train_id, current_station_idx);
             } else {
                 unsigned int next_loc = get_next_node_idx(networks[trains[i].line_id], trains[i].node_idx);
@@ -256,6 +263,7 @@ int main() {
     }
 
     // Final Update here.
+    printf("\n%s", FINAL_UPDATE_STRING);
     for (unsigned int i = 0; i < NUM_LINES; i++) {
         unsigned int average_waiting_time = 0;
         unsigned int num_waiting_count = 0;
@@ -264,16 +272,24 @@ int main() {
         unsigned int total_valid_minmax = 0;
         for (unsigned int j = 0; j < ((*networks[i]).num_nodes); j++) {
             unsigned int station_idx = get_station_idx(networks[i], j);
-            StationWait station_wait = station_waits[station_idx];
-            if (station_wait.num_trains_arrive > 0) {
-                average_waiting_time += station_wait.total_wait_time;
-                num_waiting_count += station_wait.num_trains_arrive;
-                total_min += station_wait.min_wait_time;
-                total_max += station_wait.max_wait_time;
+            StationWait* station_wait = &station_waits[i][station_idx];
+            if (station_wait->num_trains_arrive > 0) {
+                average_waiting_time += station_wait->total_wait_time;
+                num_waiting_count += station_wait->num_trains_arrive;
+                total_min += station_wait->min_wait_time;
+                total_max += station_wait->max_wait_time;
                 total_valid_minmax++;
+
             }
+            // printf("Num trains arrive: %u, %u %u %u\n", station_wait->num_trains_arrive, station_wait->total_wait_time, station_wait->min_wait_time, station_wait->max_wait_time);
+
         }
-        printf("%.2f %.2f %.2f\n", average_waiting_time / ((float) num_waiting_count), total_min / ((float) total_valid_minmax), total_max / ((float) total_valid_minmax));
+        printf("%s: %u trains -> %.1f, %.1f, %.1f\n",
+                LINE_NAMES[i],
+                num_trains_per_line[i],
+                average_waiting_time / ((float) num_waiting_count),
+                total_min / ((float) total_valid_minmax),
+                total_max / ((float) total_valid_minmax));
     }
 
 

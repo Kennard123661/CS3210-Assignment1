@@ -8,7 +8,7 @@
 #endif //CS3210_ASSIGNMENT1_STATIONWAIT_H
 
 typedef struct {
-    float total_wait_time;
+    unsigned int total_wait_time;
     unsigned int min_wait_time;
     unsigned int max_wait_time;
     unsigned int num_trains_arrive;
